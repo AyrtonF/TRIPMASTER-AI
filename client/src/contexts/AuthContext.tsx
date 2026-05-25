@@ -7,13 +7,14 @@ interface User {
   id: number;
   email?: string | null;
   username?: string | null;
+  role?: string;
 }
 
 interface AuthContextType {
   user: User | null;
-  token: string | null;
-  login: (token: string, user: User) => void;
-  logout: () => void;
+  isLoading: boolean;
+  login: (user: User) => void;
+  logout: () => Promise<void>;
   isAuthenticated: boolean;
 }
 
@@ -21,38 +22,39 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
   const [, setLocation] = useLocation();
+  const utils = trpc.useUtils();
+  const meQuery = trpc.auth.me.useQuery(undefined, {
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const logoutMutation = trpc.auth.logout.useMutation();
 
   useEffect(() => {
-    // Restore from localStorage
-    const storedToken = localStorage.getItem("auth_token");
-    const storedUser = localStorage.getItem("auth_user");
-    
-    if (storedToken && storedUser) {
-      setToken(storedToken);
-      setUser(JSON.parse(storedUser));
+    if (meQuery.data) {
+      setUser(meQuery.data as User);
+      return;
     }
-  }, []);
+    if (meQuery.isFetched) {
+      setUser(null);
+    }
+  }, [meQuery.data, meQuery.isFetched]);
 
-  const login = (newToken: string, newUser: User) => {
-    setToken(newToken);
+  const login = (newUser: User) => {
     setUser(newUser);
-    localStorage.setItem("auth_token", newToken);
-    localStorage.setItem("auth_user", JSON.stringify(newUser));
+    void utils.auth.me.invalidate();
   };
 
-  const logout = () => {
-    setToken(null);
+  const logout = async () => {
+    await logoutMutation.mutateAsync();
     setUser(null);
-    localStorage.removeItem("auth_token");
-    localStorage.removeItem("auth_user");
     toast.success("Deslogado com sucesso");
+    await utils.auth.me.invalidate();
     setLocation("/login");
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, isAuthenticated: !!token }}>
+    <AuthContext.Provider value={{ user, login, logout, isAuthenticated: !!user, isLoading: meQuery.isLoading && user === null }}>
       {children}
     </AuthContext.Provider>
   );

@@ -20,14 +20,14 @@ Em vez de depender de um único prompt gigantesco que frequentemente alucina ou 
 - **Frontend:** React + TypeScript + TailwindCSS + Wouter (Roteamento)
 - **Backend:** Node.js + Express + tRPC (Tipagem fim a fim)
 - **Integração de IA:** Google Gemini (2.5 Flash) e Groq (Llama 3.3 70B) com sistema inteligente de *Fallback* e *Rate Limit Handling*.
-- **Banco de Dados:** MySQL com Drizzle ORM
+- **Banco de Dados:** PostgreSQL com Drizzle ORM
 - **UI Components:** shadcn/ui
 
 ## ⚙️ Instalação e Execução
 
 ### Pré-requisitos
 - Node.js (v20+)
-- MySQL (ou banco de dados compatível rodando localmente)
+- PostgreSQL (ou banco de dados compatível rodando localmente)
 
 ### Passos
 
@@ -38,7 +38,7 @@ Em vez de depender de um único prompt gigantesco que frequentemente alucina ou 
    ```
 3. Configure as variáveis de ambiente criando um arquivo `.env` na raiz:
    ```env
-   DATABASE_URL=mysql://user:pass@localhost:3306/tripmaster
+   DATABASE_URL=postgresql://user:pass@localhost:5432/tripmaster
    GEMINI_API_KEY=sua_chave_do_google_ai_studio
    GROQ_API_KEY=sua_chave_do_groq
    ```
@@ -51,6 +51,33 @@ Em vez de depender de um único prompt gigantesco que frequentemente alucina ou 
    npm run dev
    ```
 6. Acesse `http://localhost:3000` (ou a porta informada no terminal).
+
+### Arquivo de Exemplo
+
+Use [`.env.example`](.env.example) como base para a configuração local.
+
+## 🐳 Docker
+
+### Subir aplicação completa com PostgreSQL
+
+1. Configure as variáveis de IA e `JWT_SECRET` no ambiente (ou em `.env`):
+   - `GEMINI_API_KEY`
+   - `GROQ_API_KEY`
+   - `JWT_SECRET`
+2. Suba os containers:
+   ```bash
+   docker compose up -d --build
+   ```
+3. As migrações são executadas automaticamente na inicialização do container da aplicação.
+4. Acesse `http://localhost:3000`.
+
+### Comandos Manuais
+
+```bash
+npm run db:generate
+npm run db:migrate
+npm run db:push
+```
 
 ## 🛡️ Tratamento de Limites (Rate Limits)
 O pipeline original utilizava execução paralela (`Promise.all`) para acelerar a geração. Porém, a requisição paralela de múltiplos LLMs estourou o limite gratuito de Tokens por Minuto (TPM) da API do Groq (12.000 TPM). O sistema foi refatorado para execução **sequencial**, mantendo as requisições em ~5.000 TPM, garantindo 100% de estabilidade e evitando a falha `413 Payload Too Large`.

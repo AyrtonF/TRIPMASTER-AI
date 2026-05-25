@@ -1,15 +1,21 @@
-import { eq, desc, or } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, sessions, Session, InsertSession } from "../drizzle/schema";
+import { asc, desc, eq, or } from "drizzle-orm";
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
+import * as schema from "../drizzle/schema";
+import { InsertUser, users, sessions, Session, loginAttempts } from "../drizzle/schema";
 import { ENV } from './_core/env';
+import { Pool } from "pg";
 
-let _db: ReturnType<typeof drizzle> | null = null;
+type Db = NodePgDatabase<typeof schema>;
+
+let _db: Db | null = null;
+let _pool: Pool | null = null;
 
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      _pool ??= new Pool({ connectionString: process.env.DATABASE_URL });
+      _db = drizzle(_pool, { schema });
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -68,7 +74,8 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       updateSet.lastSignedIn = new Date();
     }
 
-    await db.insert(users).values(values).onDuplicateKeyUpdate({
+    await db.insert(users).values(values).onConflictDoUpdate({
+      target: users.openId,
       set: updateSet,
     });
   } catch (error) {
@@ -118,9 +125,49 @@ export async function createUserLocal(user: InsertUser) {
     lastSignedIn: new Date(),
     createdAt: new Date(),
     updatedAt: new Date(),
+  }).returning({ id: users.id });
+
+  return result[0]?.id ?? 0;
+}
+
+export async function getLoginAttempt(key: string) {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  const result = await db.select().from(loginAttempts).where(eq(loginAttempts.key, key)).limit(1);
+  return result[0] ?? undefined;
+}
+
+export async function upsertLoginAttempt(key: string, attempts: number, lockedUntil: Date | null) {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  await db.insert(loginAttempts).values({
+    key,
+    attempts,
+    lockedUntil,
+    updatedAt: new Date(),
+  }).onConflictDoUpdate({
+    target: loginAttempts.key,
+    set: {
+      attempts,
+      lockedUntil,
+      updatedAt: new Date(),
+    },
   });
-  
-  return result[0].insertId;
+}
+
+export async function clearLoginAttempt(key: string) {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  await db.delete(loginAttempts).where(eq(loginAttempts.key, key));
 }
 
 export async function updateUserResetToken(userId: number, token: string | null, expiry: Date | null) {
@@ -217,6 +264,20 @@ export async function getUserSessions(userId: number): Promise<Session[]> {
     .from(sessions)
     .where(eq(sessions.userId, userId))
     .orderBy(desc(sessions.createdAt));
+}
+
+export async function getPendingSessions(limit = 10): Promise<Session[]> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database not available");
+  }
+
+  return await db
+    .select()
+    .from(sessions)
+    .where(eq(sessions.status, "pending"))
+    .orderBy(asc(sessions.createdAt))
+    .limit(limit);
 }
 
 /**

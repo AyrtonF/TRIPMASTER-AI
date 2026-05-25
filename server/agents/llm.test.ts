@@ -1,8 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { invokeLLM } from "../_core/llm";
 
-describe("LLM Integration", () => {
-  it("should successfully call the LLM API", async () => {
+const runIntegrationTests = process.env.RUN_INTEGRATION_TESTS === "true";
+const integrationDescribe = runIntegrationTests ? describe : describe.skip;
+
+integrationDescribe("LLM Integration", () => {
+  it("should successfully call the LLM API", { timeout: 30000 }, async () => {
     const response = await invokeLLM({
       messages: [
         {
@@ -21,9 +24,9 @@ describe("LLM Integration", () => {
     expect(response.choices.length).toBeGreaterThan(0);
     expect(response.choices[0].message.content).toBeDefined();
     expect(response.choices[0].message.content).toContain("TripMaster AI");
-  }, { timeout: 30000 });
+  });
 
-  it("should handle system and user messages correctly", async () => {
+  it("should handle system and user messages correctly", { timeout: 30000 }, async () => {
     const response = await invokeLLM({
       messages: [
         {
@@ -50,5 +53,5 @@ describe("LLM Integration", () => {
       expect(content).toContain("{");
       expect(content).toContain("}");
     }
-  }, { timeout: 30000 });
+  });
 });

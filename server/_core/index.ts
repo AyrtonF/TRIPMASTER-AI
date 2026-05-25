@@ -8,6 +8,8 @@ import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { executePipeline } from "../agents/pipeline";
+import { getPendingSessions } from "../db";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -43,6 +45,35 @@ async function startServer() {
       createContext,
     })
   );
+
+  let queueDraining = false;
+  const drainPendingSessions = async () => {
+    if (queueDraining) {
+      return;
+    }
+
+    queueDraining = true;
+
+    try {
+      const pendingSessions = await getPendingSessions();
+      for (const session of pendingSessions) {
+        try {
+          await executePipeline(session.id, session.inputText);
+        } catch (error) {
+          console.error(`[Queue] Failed to process session ${session.id}:`, error);
+        }
+      }
+    } finally {
+      queueDraining = false;
+    }
+  };
+
+  if (process.env.NODE_ENV !== "test") {
+    setInterval(() => {
+      void drainPendingSessions();
+    }, 5000);
+    void drainPendingSessions();
+  }
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);

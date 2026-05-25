@@ -4,51 +4,63 @@ import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
 import { publicProcedure, router } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
-import { ENV } from "../_core/env";
+import { ENV, requireEnvValue } from "../_core/env";
+import { COOKIE_NAME } from "@shared/const";
+import { getSessionCookieOptions } from "../_core/cookies";
 import {
   getUserByEmailOrUsername,
   createUserLocal,
   updateUserPassword,
   updateUserResetToken,
   getUserByResetToken,
+  getLoginAttempt,
+  upsertLoginAttempt,
+  clearLoginAttempt,
 } from "../db";
 
-// Brute Force Protection (In-memory)
-// Keys: IP address or email/username
-// Values: { attempts: number, lockedUntil: number }
-const bruteForceMap = new Map<string, { attempts: number; lockedUntil: number }>();
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
 
-function checkBruteForce(identifier: string) {
-  const record = bruteForceMap.get(identifier);
-  if (record) {
-    if (Date.now() < record.lockedUntil) {
-      throw new TRPCError({
-        code: "TOO_MANY_REQUESTS",
-        message: "Muitas tentativas falhas. Tente novamente em 15 minutos.",
-      });
-    } else if (Date.now() >= record.lockedUntil && record.attempts >= MAX_ATTEMPTS) {
-      // Reset after lockout period
-      bruteForceMap.delete(identifier);
-    }
+function getLoginKey(identifier: string) {
+  return identifier.trim().toLowerCase();
+}
+
+async function checkBruteForce(identifier: string) {
+  const record = await getLoginAttempt(identifier);
+  if (!record) {
+    return;
+  }
+
+  if (record.lockedUntil && Date.now() < record.lockedUntil.getTime()) {
+    throw new TRPCError({
+      code: "TOO_MANY_REQUESTS",
+      message: "Muitas tentativas falhas. Tente novamente em 15 minutos.",
+    });
+  }
+
+  if (record.attempts >= MAX_ATTEMPTS && record.lockedUntil && Date.now() >= record.lockedUntil.getTime()) {
+    await clearLoginAttempt(identifier);
   }
 }
 
-function recordFailedAttempt(identifier: string) {
-  const record = bruteForceMap.get(identifier) || { attempts: 0, lockedUntil: 0 };
-  record.attempts += 1;
-  if (record.attempts >= MAX_ATTEMPTS) {
-    record.lockedUntil = Date.now() + LOCKOUT_MS;
-  }
-  bruteForceMap.set(identifier, record);
+async function recordFailedAttempt(identifier: string) {
+  const record = await getLoginAttempt(identifier);
+  const attempts = (record?.attempts ?? 0) + 1;
+  const lockedUntil = attempts >= MAX_ATTEMPTS ? new Date(Date.now() + LOCKOUT_MS) : record?.lockedUntil ?? null;
+  await upsertLoginAttempt(identifier, attempts, lockedUntil);
 }
 
-function clearFailedAttempts(identifier: string) {
-  bruteForceMap.delete(identifier);
+async function clearFailedAttempts(identifier: string) {
+  await clearLoginAttempt(identifier);
+}
+
+function getJwtSecret() {
+  return requireEnvValue(ENV.jwtSecret, "JWT_SECRET");
 }
 
 export const authRouter = router({
+  me: publicProcedure.query(({ ctx }) => ctx.user),
+
   register: publicProcedure
     .input(
       z.object({
@@ -58,25 +70,37 @@ export const authRouter = router({
       })
     )
     .mutation(async ({ input }) => {
-      const existingUser = await getUserByEmailOrUsername(input.email);
-      const existingUserByName = await getUserByEmailOrUsername(input.username);
+      try {
+        const existingUser = await getUserByEmailOrUsername(input.email);
+        const existingUserByName = await getUserByEmailOrUsername(input.username);
 
-      if (existingUser || existingUserByName) {
+        if (existingUser || existingUserByName) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Email ou nome de usuário já em uso",
+          });
+        }
+
+        const passwordHash = await bcrypt.hash(input.password, 10);
+
+        const userId = await createUserLocal({
+          email: input.email,
+          username: input.username,
+          password: passwordHash,
+        });
+
+        return { success: true, userId };
+      } catch (error) {
+        if (error instanceof TRPCError) {
+          throw error;
+        }
+
+        console.error("[auth.register]", error);
         throw new TRPCError({
-          code: "CONFLICT",
-          message: "Email ou nome de usuário já em uso",
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Falha ao criar conta.",
         });
       }
-
-      const passwordHash = await bcrypt.hash(input.password, 10);
-
-      const userId = await createUserLocal({
-        email: input.email,
-        username: input.username,
-        password: passwordHash,
-      });
-
-      return { success: true, userId };
     }),
 
   login: publicProcedure
@@ -86,47 +110,74 @@ export const authRouter = router({
         password: z.string().min(1, "Senha obrigatória"),
       })
     )
-    .mutation(async ({ input }) => {
-      const lockIdentifier = input.identifier.toLowerCase();
-      checkBruteForce(lockIdentifier);
+    .mutation(async ({ ctx, input }) => {
+      const lockIdentifier = getLoginKey(input.identifier);
 
-      const user = await getUserByEmailOrUsername(input.identifier);
+      try {
+        await checkBruteForce(lockIdentifier);
 
-      if (!user || !user.password) {
-        recordFailedAttempt(lockIdentifier);
+        const user = await getUserByEmailOrUsername(input.identifier);
+
+        if (!user || !user.password) {
+          await recordFailedAttempt(lockIdentifier);
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "Credenciais inválidas",
+          });
+        }
+
+        const isValid = await bcrypt.compare(input.password, user.password);
+
+        if (!isValid) {
+          await recordFailedAttempt(lockIdentifier);
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: "Credenciais inválidas",
+          });
+        }
+
+        await clearFailedAttempts(lockIdentifier);
+
+        const token = jwt.sign(
+          { userId: user.id },
+          getJwtSecret(),
+          { expiresIn: "7d" }
+        );
+
+        ctx.res.cookie(COOKIE_NAME, token, {
+          ...getSessionCookieOptions(ctx.req),
+          maxAge: 1000 * 60 * 60 * 24 * 7,
+        });
+
+        return {
+          user: {
+            id: user.id,
+            email: user.email,
+            username: user.username,
+            role: user.role,
+          },
+        };
+      } catch (error) {
+        if (error instanceof TRPCError) {
+          throw error;
+        }
+
+        console.error("[auth.login]", error);
         throw new TRPCError({
-          code: "UNAUTHORIZED",
-          message: "Credenciais inválidas",
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Falha ao autenticar.",
         });
       }
-
-      const isValid = await bcrypt.compare(input.password, user.password);
-
-      if (!isValid) {
-        recordFailedAttempt(lockIdentifier);
-        throw new TRPCError({
-          code: "UNAUTHORIZED",
-          message: "Credenciais inválidas",
-        });
-      }
-
-      clearFailedAttempts(lockIdentifier);
-
-      const token = jwt.sign(
-        { userId: user.id },
-        ENV.cookieSecret || "fallback-secret",
-        { expiresIn: "7d" }
-      );
-
-      return {
-        token,
-        user: {
-          id: user.id,
-          email: user.email,
-          username: user.username,
-        },
-      };
     }),
+
+  logout: publicProcedure.mutation(({ ctx }) => {
+    ctx.res.clearCookie(COOKIE_NAME, {
+      ...getSessionCookieOptions(ctx.req),
+      maxAge: -1,
+    });
+
+    return { success: true } as const;
+  }),
 
   recoverPassword: publicProcedure
     .input(
@@ -149,8 +200,8 @@ export const authRouter = router({
 
       // Send email via Nodemailer
       if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-        console.warn("SMTP credentials not configured. Token generated but not sent:", resetToken);
-        return { success: true, warning: "SMTP not configured. Token logged in server console." };
+        console.warn("SMTP credentials not configured.");
+        return { success: true, warning: "SMTP não configurado." };
       }
 
       const transporter = nodemailer.createTransport({

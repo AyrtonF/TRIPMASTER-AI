@@ -7,7 +7,10 @@ import {
   updateSessionResult,
 } from "./db";
 
-describe("Integration Tests", () => {
+const runIntegrationTests = process.env.RUN_INTEGRATION_TESTS === "true";
+const integrationDescribe = runIntegrationTests ? describe : describe.skip;
+
+integrationDescribe("Integration Tests", () => {
   let testSessionId: string;
 
   beforeAll(async () => {

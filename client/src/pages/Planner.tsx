@@ -11,13 +11,13 @@ import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 
 export default function Planner() {
-  const { isAuthenticated, logout, user } = useAuth();
+  const { isAuthenticated, isLoading, logout, user } = useAuth();
   const [, navigate] = useLocation();
   const [originText, setOriginText] = useState("");
   const [days, setDays] = useState("");
   const [inputText, setInputText] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // tRPC hooks
   const createSessionMutation = trpc.sessions.create.useMutation();
@@ -28,10 +28,10 @@ export default function Planner() {
 
   // Redirect if not authenticated
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isLoading && !isAuthenticated) {
       navigate("/");
     }
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, isLoading, navigate]);
 
   const handleCreateSession = async () => {
     if (!inputText.trim() || inputText.length < 10) {
@@ -39,7 +39,7 @@ export default function Planner() {
       return;
     }
 
-    setIsLoading(true);
+    setIsSubmitting(true);
     try {
       let finalInputText = inputText;
       if (originText.trim() || days.trim()) {
@@ -57,7 +57,7 @@ export default function Planner() {
     } catch (error) {
       alert(`Erro ao criar sessão: ${error}`);
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -78,6 +78,7 @@ export default function Planner() {
     presentation: "Apresentação",
   };
 
+  if (isLoading) return null;
   if (!isAuthenticated) return null;
 
   return (
@@ -138,7 +139,7 @@ export default function Planner() {
                           placeholder="Ex: São Paulo, SP"
                           value={originText}
                           onChange={(e) => setOriginText(e.target.value)}
-                          disabled={isLoading}
+                          disabled={isSubmitting}
                           className="bg-background/50"
                         />
                       </div>
@@ -154,7 +155,7 @@ export default function Planner() {
                           max="30"
                           value={days}
                           onChange={(e) => setDays(e.target.value)}
-                          disabled={isLoading}
+                          disabled={isSubmitting}
                           className="bg-background/50"
                         />
                       </div>
@@ -169,7 +170,7 @@ export default function Planner() {
                         value={inputText}
                         onChange={(e) => setInputText(e.target.value)}
                         className="min-h-32 resize-none bg-background/50"
-                        disabled={isLoading}
+                        disabled={isSubmitting}
                       />
                     </div>
                   </div>
@@ -178,10 +179,10 @@ export default function Planner() {
                     <Button
                       size="lg"
                       onClick={handleCreateSession}
-                      disabled={isLoading || inputText.length < 10}
+                      disabled={isSubmitting || inputText.length < 10}
                       className="gap-2 bg-primary hover:bg-primary/90 text-primary-foreground flex-1"
                     >
-                      {isLoading ? (
+                      {isSubmitting ? (
                         <>
                           <Loader2 className="h-5 w-5 animate-spin" />
                           Processando...

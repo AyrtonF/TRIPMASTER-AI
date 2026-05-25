@@ -4,6 +4,7 @@ import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import { DashboardLayoutSkeleton } from "./components/DashboardLayoutSkeleton";
 import Home from "./pages/Home";
 import Planner from "./pages/Planner";
 import Login from "./pages/Login";
@@ -15,14 +16,18 @@ import { useLocation } from "wouter";
 import { useEffect } from "react";
 
 function PrivateRoute({ component: Component }: { component: any }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
   const [, setLocation] = useLocation();
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isLoading && !isAuthenticated) {
       setLocation("/login");
     }
-  }, [isAuthenticated, setLocation]);
+  }, [isAuthenticated, isLoading, setLocation]);
+
+  if (isLoading) {
+    return <DashboardLayoutSkeleton />;
+  }
 
   return isAuthenticated ? <Component /> : null;
 }

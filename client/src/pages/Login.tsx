@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useEffect } from "react";
 import { useLocation, Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,12 +14,18 @@ export default function Login() {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [, setLocation] = useLocation();
-  const { login } = useAuth();
+  const { login, isAuthenticated, isLoading } = useAuth();
+
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      setLocation("/planner");
+    }
+  }, [isAuthenticated, isLoading, setLocation]);
 
   const loginMutation = trpc.auth.login.useMutation({
     onSuccess: (data) => {
       toast.success("Login efetuado com sucesso!");
-      login(data.token, data.user);
+      login(data.user);
       setLocation("/planner");
     },
     onError: (error) => {
@@ -30,6 +37,10 @@ export default function Login() {
     e.preventDefault();
     loginMutation.mutate({ identifier, password });
   };
+
+  if (isLoading) {
+    return <div className="min-h-screen bg-muted/30" />;
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-muted/30 p-4">

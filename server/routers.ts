@@ -6,9 +6,17 @@ import {
   getSessionById,
   getUserSessions,
 } from "./db";
-import { executePipeline, calculateProgress } from "./agents/pipeline";
+import { calculateProgress } from "./agents/pipeline";
 import { authRouter } from "./routers/authRouter";
 import { TRPCError } from "@trpc/server";
+
+function failWithInternalError(message: string, scope: string, error: unknown): never {
+  console.error(`[${scope}]`, error);
+  throw new TRPCError({
+    code: "INTERNAL_SERVER_ERROR",
+    message,
+  });
+}
 
 export const appRouter = router({
   system: systemRouter,
@@ -27,13 +35,7 @@ export const appRouter = router({
       )
       .mutation(async ({ input, ctx }) => {
         try {
-          // Create session in database using authenticated user
           const sessionId = await createSession(ctx.user.id, input.inputText);
-
-          // Start the pipeline asynchronously (don't wait for it)
-          executePipeline(sessionId, input.inputText).catch((error) => {
-            console.error(`[Pipeline Error] Session ${sessionId}:`, error);
-          });
 
           return {
             sessionId,
@@ -41,7 +43,7 @@ export const appRouter = router({
             createdAt: new Date(),
           };
         } catch (error) {
-          throw new Error(`Failed to create session: ${error}`);
+          failWithInternalError("Falha ao criar sessão.", "sessions.create", error);
         }
       }),
 
@@ -56,14 +58,13 @@ export const appRouter = router({
           const session = await getSessionById(input.sessionId);
 
           if (!session) {
-            throw new Error("Session not found");
+            throw new TRPCError({ code: "NOT_FOUND", message: "Sessão não encontrada." });
           }
 
           if (session.userId !== ctx.user.id) {
-            throw new TRPCError({ code: "UNAUTHORIZED", message: "Unauthorized session access" });
+            throw new TRPCError({ code: "UNAUTHORIZED", message: "Acesso não autorizado." });
           }
 
-          // Calculate progress
           const progress = session.status === "completed" ? 100 : calculateProgress(session.currentAgent);
 
           return {
@@ -77,7 +78,11 @@ export const appRouter = router({
             completedAt: session.completedAt,
           };
         } catch (error) {
-          throw new Error(`Failed to get session: ${error}`);
+          if (error instanceof TRPCError) {
+            throw error;
+          }
+
+          failWithInternalError("Falha ao obter sessão.", "sessions.get", error);
         }
       }),
 
@@ -97,7 +102,7 @@ export const appRouter = router({
           hasResult: !!session.result,
         }));
       } catch (error) {
-        throw new Error(`Failed to list sessions: ${error}`);
+        failWithInternalError("Falha ao listar sessões.", "sessions.list", error);
       }
     }),
 
@@ -108,20 +113,23 @@ export const appRouter = router({
       .input(z.object({ sessionId: z.string() }))
       .mutation(async ({ input, ctx }) => {
         try {
-          // Verify session exists and belongs to user
           const session = await getSessionById(input.sessionId);
           if (!session) {
-            throw new Error("Session not found");
+            throw new TRPCError({ code: "NOT_FOUND", message: "Sessão não encontrada." });
           }
           if (session.userId !== ctx.user.id) {
-            throw new TRPCError({ code: "UNAUTHORIZED", message: "Unauthorized" });
+            throw new TRPCError({ code: "UNAUTHORIZED", message: "Acesso não autorizado." });
           }
 
           const { deleteSession } = await import("./db");
           await deleteSession(input.sessionId);
           return { success: true };
         } catch (error) {
-          throw new Error(`Failed to delete session: ${error}`);
+          if (error instanceof TRPCError) {
+            throw error;
+          }
+
+          failWithInternalError("Falha ao excluir sessão.", "sessions.delete", error);
         }
       }),
   }),

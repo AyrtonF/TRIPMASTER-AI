@@ -1,6 +1,6 @@
 export const ENV = {
   appId: process.env.VITE_APP_ID ?? "",
-  cookieSecret: process.env.JWT_SECRET ?? "",
+  jwtSecret: process.env.JWT_SECRET ?? "",
   databaseUrl: process.env.DATABASE_URL ?? "",
   oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
@@ -12,3 +12,11 @@ export const ENV = {
   groqApiKeys: (process.env.GROQ_API_KEYS || process.env.GROQ_API_KEY || "").split(",").map(k => k.trim()).filter(Boolean),
   geminiApiKey: process.env.GEMINI_API_KEY ?? "",
 };
+
+export function requireEnvValue(value: string | undefined | null, name: string): string {
+  if (!value || !value.trim()) {
+    throw new Error(`${name} is required`);
+  }
+
+  return value.trim();
+}
