@@ -9,6 +9,7 @@ import { Streamdown } from "streamdown";
 import { ArrowLeft, Send, Loader2, CheckCircle2, AlertCircle, Trash2, LogOut, User } from "lucide-react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { SessionHistory } from "@/components/SessionHistory";
 
 export default function Planner() {
   const { isAuthenticated, isLoading, logout, user } = useAuth();
@@ -94,9 +95,12 @@ export default function Planner() {
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <div className="flex items-center gap-2">
+          <div 
+            className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
+            onClick={() => navigate("/")}
+          >
             <img src="/logo.png" alt="TripMaster AI Logo" className="w-8 h-8 rounded-lg object-cover" />
-            <h1 className="text-xl sm:text-2xl font-bold text-foreground truncate">Planejador de Viagens</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground truncate">TRIPMASTER AI</h1>
           </div>
           <div className="flex-1" />
           <div className="flex items-center gap-4">
@@ -166,9 +170,17 @@ export default function Planner() {
                         Detalhes da Viagem
                       </label>
                       <Textarea
-                        placeholder="Ex: Quero viajar com minha família para o Nordeste em julho, foco em praias e cultura, até R$ 6.000..."
+                        placeholder="Ex: Viagem romântica, preferência por casa de praia, com foco em relaxamento e jantares. Orçamento máximo de R$ 3.000..."
                         value={inputText}
                         onChange={(e) => setInputText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                            e.preventDefault();
+                            if (!isLoading && inputText.length >= 10) {
+                              handleCreateSession();
+                            }
+                          }
+                        }}
                         className="min-h-32 resize-none bg-background/50"
                         disabled={isSubmitting}
                       />
@@ -330,81 +342,3 @@ export default function Planner() {
   );
 }
 
-function SessionHistory({ onSelectSession, currentSessionId }: { onSelectSession: (id: string) => void, currentSessionId: string | null }) {
-  const listSessionsQuery = trpc.sessions.list.useQuery();
-  const deleteSessionMutation = trpc.sessions.delete.useMutation({
-    onSuccess: () => {
-      listSessionsQuery.refetch();
-    },
-  });
-
-  if (listSessionsQuery.isLoading) {
-    return <div className="text-center py-8"><Spinner /></div>;
-  }
-
-  if (!listSessionsQuery.data || listSessionsQuery.data.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground text-center py-8">
-        Nenhuma sessão anterior
-      </p>
-    );
-  }
-
-  const handleDelete = (e: React.MouseEvent, sessionId: string) => {
-    e.stopPropagation();
-    if (confirm("Deseja realmente excluir este histórico?")) {
-      deleteSessionMutation.mutate({ sessionId });
-    }
-  };
-
-  return (
-    <div className="space-y-2 max-h-96 overflow-y-auto">
-      {listSessionsQuery.data.map((session) => (
-        <div
-          key={session.sessionId}
-          onClick={() => onSelectSession(session.sessionId)}
-          className={`p-3 rounded-lg border cursor-pointer transition-colors relative group ${
-            currentSessionId === session.sessionId 
-              ? "bg-primary/20 border-primary" 
-              : "bg-secondary/50 border-border hover:border-primary/50"
-          }`}
-        >
-          <div className="flex justify-between items-start gap-2">
-            <p className="text-xs font-medium text-foreground line-clamp-2">
-              {session.inputText}
-            </p>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive shrink-0"
-              onClick={(e) => handleDelete(e, session.sessionId)}
-              disabled={deleteSessionMutation.isPending}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
-          <div className="flex items-center justify-between mt-2">
-            <span className="text-xs text-muted-foreground">
-              {new Date(session.createdAt).toLocaleDateString("pt-BR")}
-            </span>
-            <span
-              className={`text-xs font-medium px-2 py-1 rounded ${
-                session.status === "completed"
-                  ? "bg-green-500/20 text-green-600"
-                  : session.status === "error"
-                  ? "bg-red-500/20 text-red-600"
-                  : "bg-blue-500/20 text-blue-600"
-              }`}
-            >
-              {session.status === "completed"
-                ? "Concluído"
-                : session.status === "error"
-                ? "Erro"
-                : "Processando"}
-            </span>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}

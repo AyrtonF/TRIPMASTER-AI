@@ -34,7 +34,7 @@ Em vez de depender de um único prompt gigantesco que frequentemente alucina ou 
 1. Clone o repositório
 2. Instale as dependências:
    ```bash
-   npm install
+   npm install ou npm install --legacy-peer-deps
    ```
 3. Configure as variáveis de ambiente criando um arquivo `.env` na raiz:
    ```env
