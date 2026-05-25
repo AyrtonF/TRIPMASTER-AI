@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1779653205583,
+      "tag": "0000_new_hemingway",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1779653621289,
+      "tag": "0001_friendly_mister_fear",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1779663777237,
+      "tag": "0002_sleepy_talon",
+      "breakpoints": true
+    }
+  ]
+}
