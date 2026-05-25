@@ -6,7 +6,8 @@ import {
   getSessionById,
   getUserSessions,
 } from "./db";
-import { executePipeline, calculateProgress } from "./agents/pipeline";
+import { executePipeline } from "./agents/pipeline";
+import { calculateProgress } from "./agents/utils";
 import { authRouter } from "./routers/authRouter";
 import { TRPCError } from "@trpc/server";
 
